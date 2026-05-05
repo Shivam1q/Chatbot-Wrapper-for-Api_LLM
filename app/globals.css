@@ -2,26 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: 0 0% 100%;
+    --foreground: 220 13% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 13%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 13%;
+    --primary: 222 47% 11%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 13% 13%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 13% 13%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 222 47% 11%;
+    --radius: 0.625rem;
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-sm: calc(var(--radius) * 0.6);
+  }
+
+  .dark {
+    --background: 222 25% 6%;
+    --foreground: 210 20% 98%;
+    --card: 222 25% 8%;
+    --card-foreground: 210 20% 98%;
+    --popover: 222 25% 8%;
+    --popover-foreground: 210 20% 98%;
+    --primary: 210 20% 98%;
+    --primary-foreground: 222 25% 8%;
+    --secondary: 222 18% 14%;
+    --secondary-foreground: 210 20% 98%;
+    --muted: 222 18% 14%;
+    --muted-foreground: 217 10% 64%;
+    --accent: 222 18% 16%;
+    --accent-foreground: 210 20% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 222 18% 16%;
+    --input: 222 18% 16%;
+    --ring: 217 10% 64%;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  ::selection {
+    @apply bg-primary/20;
+  }
 }
 
+/* Subtle scrollbar */
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* Prose tweaks for chat */
+.prose-chat :where(p):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+.prose-chat :where(ul, ol):not(:where([class~="not-prose"] *)) {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+.prose-chat :where(p:first-child, ul:first-child, ol:first-child, h1:first-child, h2:first-child, h3:first-child):not(:where([class~="not-prose"] *)) {
+  margin-top: 0;
+}
+.prose-chat :where(p:last-child, ul:last-child, ol:last-child):not(:where([class~="not-prose"] *)) {
+  margin-bottom: 0;
+}
+.prose-chat :where(pre):not(:where([class~="not-prose"] *)) {
+  margin: 0.6em 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+.prose-chat :where(code):not(:where([class~="not-prose"] *))::before,
+.prose-chat :where(code):not(:where([class~="not-prose"] *))::after {
+  content: "";
 }
