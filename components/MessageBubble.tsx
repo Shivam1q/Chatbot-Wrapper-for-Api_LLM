@@ -19,7 +19,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
 }
 
-function CodeBlock({
+const CodeBlock = React.memo(function CodeBlock({
   language,
   code,
   dark,
@@ -75,7 +75,7 @@ function CodeBlock({
       </SyntaxHighlighter>
     </div>
   );
-}
+});
 
 function AttachmentChip({
   name,
@@ -99,7 +99,7 @@ function AttachmentChip({
   );
 }
 
-export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
+function MessageBubbleImpl({ message, isStreaming }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
@@ -114,6 +114,69 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
       /* ignore */
     }
   }, [message.content]);
+
+  // Stable across re-renders unless the dark flag actually flips. Avoids
+  // recreating the components map on every streamed chunk, which prevents
+  // ReactMarkdown from blowing away its child tree each tick.
+  const markdownComponents = React.useMemo(
+    () => ({
+      code(props: React.ComponentProps<"code"> & { children?: React.ReactNode }) {
+        const { children, className } = props;
+        const match = /language-(\w+)/.exec(className || "");
+        const codeString = String(children).replace(/\n$/, "");
+        const isBlock = Boolean(match);
+        if (isBlock) {
+          return (
+            <CodeBlock language={match![1]} code={codeString} dark={dark} />
+          );
+        }
+        return (
+          <code
+            className={cn(
+              "rounded-md border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em]",
+              className
+            )}
+          >
+            {children}
+          </code>
+        );
+      },
+      a({ children, href }: React.ComponentProps<"a">) {
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-primary"
+          >
+            {children}
+          </a>
+        );
+      },
+      table({ children }: { children?: React.ReactNode }) {
+        return (
+          <div className="not-prose overflow-x-auto rounded-md border border-border my-2">
+            <table className="w-full text-sm">{children}</table>
+          </div>
+        );
+      },
+      th({ children }: { children?: React.ReactNode }) {
+        return (
+          <th className="border-b border-border bg-muted/40 px-3 py-1.5 text-left font-medium">
+            {children}
+          </th>
+        );
+      },
+      td({ children }: { children?: React.ReactNode }) {
+        return (
+          <td className="border-b border-border/60 px-3 py-1.5">
+            {children}
+          </td>
+        );
+      },
+    }),
+    [dark]
+  );
 
   return (
     <div
@@ -156,66 +219,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
             <div className="prose prose-sm prose-chat max-w-none dark:prose-invert">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={{
-                  code(props) {
-                    const { children, className } = props;
-                    const match = /language-(\w+)/.exec(className || "");
-                    const codeString = String(children).replace(/\n$/, "");
-                    const isBlock = Boolean(match);
-                    if (isBlock) {
-                      return (
-                        <CodeBlock
-                          language={match![1]}
-                          code={codeString}
-                          dark={dark}
-                        />
-                      );
-                    }
-                    return (
-                      <code
-                        className={cn(
-                          "rounded-md border border-border/60 bg-muted px-1.5 py-0.5 font-mono text-[0.85em]",
-                          className
-                        )}
-                      >
-                        {children}
-                      </code>
-                    );
-                  },
-                  a({ children, href }) {
-                    return (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="underline underline-offset-2 hover:text-primary"
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                  table({ children }) {
-                    return (
-                      <div className="not-prose overflow-x-auto rounded-md border border-border my-2">
-                        <table className="w-full text-sm">{children}</table>
-                      </div>
-                    );
-                  },
-                  th({ children }) {
-                    return (
-                      <th className="border-b border-border bg-muted/40 px-3 py-1.5 text-left font-medium">
-                        {children}
-                      </th>
-                    );
-                  },
-                  td({ children }) {
-                    return (
-                      <td className="border-b border-border/60 px-3 py-1.5">
-                        {children}
-                      </td>
-                    );
-                  },
-                }}
+                components={markdownComponents}
               >
                 {message.content || (isStreaming ? "\u200b" : "")}
               </ReactMarkdown>
@@ -256,3 +260,15 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
     </div>
   );
 }
+
+// Only re-render a bubble when something it actually displays changed.
+// During streaming, ChatWindow rebuilds the messages array on every flushed
+// chunk; without this guard every bubble (markdown + Prism) would re-render.
+export const MessageBubble = React.memo(MessageBubbleImpl, (prev, next) => {
+  if (prev.isStreaming !== next.isStreaming) return false;
+  if (prev.message.id !== next.message.id) return false;
+  if (prev.message.content !== next.message.content) return false;
+  if (prev.message.role !== next.message.role) return false;
+  if (prev.message.attachments !== next.message.attachments) return false;
+  return true;
+});

@@ -2,13 +2,23 @@
 
 import { v4 as uuidv4 } from "uuid";
 import type { ChatSession, Message, StoredChatSession, StoredMessage } from "@/types";
-import { defaultModelForProvider } from "@/lib/providers";
+import {
+  MODELS_BY_PROVIDER,
+  defaultModelForProvider,
+} from "@/lib/providers";
 
 const STORAGE_KEY = "ai-chat-wrapper-sessions";
 
 function fromStored(s: StoredChatSession): ChatSession {
+  // Normalize legacy / removed model ids to a current valid default so
+  // restoring a session never tries to call a deprecated provider model.
+  const validModels = MODELS_BY_PROVIDER[s.provider] ?? [];
+  const model = validModels.includes(s.model)
+    ? s.model
+    : defaultModelForProvider(s.provider);
   return {
     ...s,
+    model,
     createdAt: new Date(s.createdAt),
     messages: s.messages.map(fromStoredMessage),
   };

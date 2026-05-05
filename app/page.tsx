@@ -75,6 +75,33 @@ export default function HomePage() {
   const sessionsRef = React.useRef(sessions);
   sessionsRef.current = sessions;
   const abortRef = React.useRef<AbortController | null>(null);
+  const streamBufferRef = React.useRef<{
+    pending: string;
+    sessionId: string;
+    asstId: string;
+    rafId: number | null;
+  } | null>(null);
+
+  const flushStream = React.useCallback(() => {
+    const buf = streamBufferRef.current;
+    if (!buf) return;
+    buf.rafId = null;
+    if (!buf.pending) return;
+    const text = buf.pending;
+    buf.pending = "";
+    const { sessionId, asstId } = buf;
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessionId) return s;
+        return {
+          ...s,
+          messages: s.messages.map((m) =>
+            m.id === asstId ? { ...m, content: m.content + text } : m
+          ),
+        };
+      })
+    );
+  }, []);
 
   React.useEffect(() => {
     setMounted(true);
@@ -202,6 +229,13 @@ export default function HomePage() {
     setAwaiting(true);
     setStreamingMessageId(asstId);
 
+    streamBufferRef.current = {
+      pending: "",
+      sessionId,
+      asstId,
+      rafId: null,
+    };
+
     try {
       await streamChatCompletion(
         {
@@ -212,19 +246,12 @@ export default function HomePage() {
           apiKey,
         },
         (chunk) => {
-          setSessions((prev) =>
-            prev.map((s) => {
-              if (s.id !== sessionId) return s;
-              return {
-                ...s,
-                messages: s.messages.map((m) =>
-                  m.id === asstId
-                    ? { ...m, content: m.content + chunk }
-                    : m
-                ),
-              };
-            })
-          );
+          const buf = streamBufferRef.current;
+          if (!buf) return;
+          buf.pending += chunk;
+          if (buf.rafId == null && typeof window !== "undefined") {
+            buf.rafId = window.requestAnimationFrame(flushStream);
+          }
         },
         { signal: controller.signal }
       );
@@ -260,6 +287,13 @@ export default function HomePage() {
         })
       );
     } finally {
+      const buf = streamBufferRef.current;
+      if (buf?.rafId != null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(buf.rafId);
+      }
+      flushStream();
+      streamBufferRef.current = null;
+
       abortRef.current = null;
       setAwaiting(false);
       setStreamingMessageId(null);

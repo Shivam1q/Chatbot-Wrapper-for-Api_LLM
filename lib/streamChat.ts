@@ -36,6 +36,10 @@ export async function streamChatCompletion(
   });
 
   if (!res.ok) {
+    // 499 = client-aborted; treat as a clean stop, not an error
+    if (res.status === 499) {
+      throw new StreamAbortedError();
+    }
     let message = res.statusText || `HTTP ${res.status}`;
     try {
       const j = (await res.json()) as { error?: string };

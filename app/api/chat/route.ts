@@ -7,6 +7,7 @@ import { resolveApiModelId } from "@/lib/providers";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
+export const dynamic = "force-dynamic";
 
 type Role = "user" | "assistant" | "system";
 
@@ -26,6 +27,16 @@ interface ChatBody {
 
 function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status });
+}
+
+function isAbortError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const err = e as { name?: string; message?: string };
+  return (
+    err.name === "AbortError" ||
+    err.name === "APIUserAbortError" ||
+    /aborted/i.test(err.message ?? "")
+  );
 }
 
 function appendTextAttachments(
@@ -130,10 +141,18 @@ export async function POST(req: Request) {
 
   const apiModel = resolveApiModelId(provider, model);
   const enc = new TextEncoder();
+  const upstream = new AbortController();
+  // Cancel upstream when the browser disconnects.
+  if (req.signal) {
+    if (req.signal.aborted) upstream.abort();
+    else req.signal.addEventListener("abort", () => upstream.abort(), {
+      once: true,
+    });
+  }
 
   try {
     if (provider === "anthropic") {
-      const client = new Anthropic({ apiKey });
+      const client = new Anthropic({ apiKey, maxRetries: 0 });
       const anthropicMessages: Anthropic.MessageParam[] = [];
 
       for (const m of messages) {
@@ -151,12 +170,15 @@ export async function POST(req: Request) {
         }
       }
 
-      const stream = client.messages.stream({
-        model: apiModel,
-        max_tokens: 8192,
-        system: systemPrompt || undefined,
-        messages: anthropicMessages,
-      });
+      const stream = client.messages.stream(
+        {
+          model: apiModel,
+          max_tokens: 8192,
+          system: systemPrompt || undefined,
+          messages: anthropicMessages,
+        },
+        { signal: upstream.signal }
+      );
 
       const readable = new ReadableStream({
         async start(controller) {
@@ -170,22 +192,31 @@ export async function POST(req: Request) {
               }
             }
           } catch (e) {
-            const msg =
-              e instanceof Error ? e.message : "Anthropic stream error";
-            controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+            if (!isAbortError(e)) {
+              const msg =
+                e instanceof Error ? e.message : "Anthropic stream error";
+              controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+            }
           } finally {
             controller.close();
           }
         },
+        cancel() {
+          upstream.abort();
+        },
       });
 
       return new Response(readable, {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
+        },
       });
     }
 
     if (provider === "openai") {
-      const client = new OpenAI({ apiKey });
+      const client = new OpenAI({ apiKey, maxRetries: 0 });
       const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
       if (systemPrompt) {
         openaiMessages.push({ role: "system", content: systemPrompt });
@@ -205,11 +236,14 @@ export async function POST(req: Request) {
         }
       }
 
-      const stream = await client.chat.completions.create({
-        model: apiModel,
-        messages: openaiMessages,
-        stream: true,
-      });
+      const stream = await client.chat.completions.create(
+        {
+          model: apiModel,
+          messages: openaiMessages,
+          stream: true,
+        },
+        { signal: upstream.signal }
+      );
 
       const readable = new ReadableStream({
         async start(controller) {
@@ -219,17 +253,26 @@ export async function POST(req: Request) {
               if (piece) controller.enqueue(enc.encode(piece));
             }
           } catch (e) {
-            const msg =
-              e instanceof Error ? e.message : "OpenAI stream error";
-            controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+            if (!isAbortError(e)) {
+              const msg =
+                e instanceof Error ? e.message : "OpenAI stream error";
+              controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+            }
           } finally {
             controller.close();
           }
         },
+        cancel() {
+          upstream.abort();
+        },
       });
 
       return new Response(readable, {
-        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          "X-Accel-Buffering": "no",
+        },
       });
     }
 
@@ -275,7 +318,10 @@ export async function POST(req: Request) {
       return jsonError("No messages for Gemini", 400);
     }
 
-    const result = await modelWithSys.generateContentStream({ contents });
+    const result = await modelWithSys.generateContentStream(
+      { contents },
+      { signal: upstream.signal }
+    );
 
     const readable = new ReadableStream({
       async start(controller) {
@@ -285,18 +331,31 @@ export async function POST(req: Request) {
             if (t) controller.enqueue(enc.encode(t));
           }
         } catch (e) {
-          const msg = e instanceof Error ? e.message : "Gemini stream error";
-          controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+          if (!isAbortError(e)) {
+            const msg =
+              e instanceof Error ? e.message : "Gemini stream error";
+            controller.enqueue(enc.encode(`\n\n[Error] ${msg}`));
+          }
         } finally {
           controller.close();
         }
       },
+      cancel() {
+        upstream.abort();
+      },
     });
 
     return new Response(readable, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
     });
   } catch (e) {
+    if (isAbortError(e)) {
+      return new Response("", { status: 499 });
+    }
     const msg =
       e instanceof Error ? e.message : "Failed to start chat completion";
     return jsonError(msg, 500);
